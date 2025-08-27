@@ -28,7 +28,7 @@ You can add or remove target groups in the configuration file at any time, or sp
 ### 1. Clone and Enter the Project
 
 ```bash
-git clone https://github.com/<your-repo>/query-common-group-chats-bot.git
+git clone https://github.com/Tools-cx-app/Query-common-group-chats-bot.git
 cd query-common-group-chats-bot
 ```
 
@@ -90,5 +90,5 @@ RUST_LOG=info cargo run --release > bot.log 2>&1
 
 ---
 
-Development & Contributions
-PRs and Issues are welcome!
+# Tips
+For the first run, you need to modify the API_ID, API_HASH and SUPER_ADMIN in the src/defs.rs file.

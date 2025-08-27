@@ -26,7 +26,7 @@
 ### 1. 克隆并进入项目
 
 ```bash
-git clone https://github.com/<your-repo>/query-common-group-chats-bot.git
+git clone https://github.com/Tools-cx-app/Query-common-group-chats-bot.git
 cd query-common-group-chats-bot
 ```
 
@@ -87,5 +87,5 @@ admins = []
 
 ---
 
-开发 & 贡献
-欢迎 PR / Issue！
+### Tips
+首次运行需要修改src/defs.rs文件中的API_ID、API_HASH和SUPER_ADMIN。
