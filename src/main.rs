@@ -3,7 +3,8 @@ use std::io::Write;
 use anyhow::Result;
 use env_logger::Builder;
 use grammers_client::{
-    Client, Config, InputMessage, SignInError, Update,
+    Client, Config, InitParams, InputMessage, ReconnectionPolicy, SignInError,
+    Update,
     grammers_tl_types::{self as tl},
     session::Session,
     types::PackedChat,
@@ -19,6 +20,14 @@ mod config;
 mod defs;
 mod utils;
 
+struct Reconnection;
+
+impl ReconnectionPolicy for Reconnection {
+    fn should_retry(&self, attempts: usize) -> std::ops::ControlFlow<(), std::time::Duration> {
+        let duration = u64::pow(2, attempts as _);
+        std::ops::ControlFlow::Continue(std::time::Duration::from_millis(duration))
+    }
+}
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut builder = Builder::new();
@@ -42,14 +51,20 @@ async fn main() -> Result<()> {
         session: Session::load_file_or_create(SESSION_FILE)?,
         api_id: API_ID,
         api_hash: API_HASH.to_string(),
-        params: Default::default(),
+        params: InitParams {
+            reconnection_policy: &Reconnection,
+            ..Default::default()
+        },
     })
     .await?;
     let bot = Client::connect(Config {
         session: Session::load_file_or_create(BOT_SESSION_FILE)?,
         api_id: API_ID,
         api_hash: API_HASH.to_string(),
-        params: Default::default(),
+        params: InitParams {
+            reconnection_policy: &Reconnection,
+            ..Default::default()
+        },
     })
     .await?;
     log::info!("Connected!");
