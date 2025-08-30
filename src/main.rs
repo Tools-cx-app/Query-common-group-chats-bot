@@ -3,8 +3,7 @@ use std::io::Write;
 use anyhow::Result;
 use env_logger::Builder;
 use grammers_client::{
-    Client, Config, InitParams, InputMessage, ReconnectionPolicy, SignInError,
-    Update,
+    Client, Config, InitParams, InputMessage, ReconnectionPolicy, SignInError, Update,
     grammers_tl_types::{self as tl},
     session::Session,
     types::PackedChat,
@@ -24,7 +23,10 @@ struct Reconnection;
 
 impl ReconnectionPolicy for Reconnection {
     fn should_retry(&self, attempts: usize) -> std::ops::ControlFlow<(), std::time::Duration> {
-        let duration = u64::pow(2, attempts as _);
+        if attempts > 5 {
+            panic!("reconnect attempts is 5, but not connect");
+        }
+        let duration = u64::pow(5, attempts as _);
         std::ops::ControlFlow::Continue(std::time::Duration::from_millis(duration))
     }
 }
@@ -265,6 +267,108 @@ async fn main() -> Result<()> {
                             )
                         } else {
                             format!("与用户 {} 共同群 {} 个", packed_user.id.to_string(), count)
+                        }
+                    };
+                    bot.edit_message(chat.clone(), sended_msg.id(), send_msg)
+                        .await?;
+                }
+                if text == "?c" {
+                    let config = MainConfig::read_config();
+                    let group = config.groups;
+                    let admins = config.admins;
+                    let reply = match msg.get_reply().await? {
+                        Some(r) => r,
+                        None => {
+                            bot.send_message(
+                                chat.clone(),
+                                InputMessage::text("请回复消息").reply_to(reply_id),
+                            )
+                            .await?;
+                            continue;
+                        }
+                    };
+                    let sender = match reply.sender() {
+                        Some(s) => s,
+                        None => {
+                            bot.send_message(
+                                chat.clone(),
+                                InputMessage::text("无法获取发送者").reply_to(reply_id),
+                            )
+                            .await?;
+                            continue;
+                        }
+                    };
+                    let sender = sender.pack();
+                    if let None = sender.access_hash {
+                        bot.send_message(
+                            chat.clone(),
+                            InputMessage::text("无法获取access_hash").reply_to(reply_id),
+                        )
+                        .await?;
+                        continue;
+                    }
+                    if sender.id == client.get_me().await?.id()
+                        || sender.id == bot.get_me().await?.id()
+                    {
+                        bot.send_message(
+                            chat.clone(),
+                            InputMessage::text("不能查询自身").reply_to(reply_id),
+                        )
+                        .await?;
+                        continue;
+                    }
+                    let sended_msg = bot
+                        .send_message(
+                            chat.clone(),
+                            InputMessage::text("查询中...").reply_to(reply_id),
+                        )
+                        .await?;
+                    let mut count = 0;
+                    let mut admin_list = Vec::new();
+                    let groups = get_common_chats(&client, &sender, 100).await?;
+                    for i in groups {
+                        if group.contains(&i.id()) {
+                            let mut title = String::new();
+                            let mut username = String::new();
+                            match i {
+                                tl::enums::Chat::Channel(c) => {
+                                    title = c.title;
+                                    if let Some(s) = c.username {
+                                        username = format!("@{}", s);
+                                    } else {
+                                        username = "N/A".to_string();
+                                    }
+                                }
+                                _ => {}
+                            }
+                            admin_list.insert(count, (title, username));
+                            count += 1;
+                        }
+                    }
+
+                    if count == 0 {
+                        bot.edit_message(chat.clone(), sended_msg.id(), "未查询到共同群")
+                            .await?;
+                        continue;
+                    }
+                    let send_msg = {
+                        if admins.contains(&chat.id()) && msg.chat().pack().is_user() {
+                            let s: String = admin_list
+                                .iter()
+                                .map(|(t, u)| format!("{} - {}", t, u))
+                                .collect::<Vec<_>>()
+                                .join("\n");
+
+                            format!(
+                                r#"与用户 {} 共同群 {} 个
+具体群组:
+{}"#,
+                                sender.id.to_string(),
+                                count,
+                                s
+                            )
+                        } else {
+                            format!("与用户 {} 共同群 {} 个", sender.id.to_string(), count)
                         }
                     };
                     bot.edit_message(chat.clone(), sended_msg.id(), send_msg)
