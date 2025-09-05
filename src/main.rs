@@ -1,4 +1,7 @@
-use std::io::Write;
+use std::{
+    io::Write,
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
 use env_logger::Builder;
@@ -8,10 +11,11 @@ use grammers_client::{
     session::Session,
     types::PackedChat,
 };
+use tokio::time::{sleep, timeout};
 
 use crate::{
     config::MainConfig,
-    defs::{API_HASH, API_ID, BOT_SESSION_FILE, SESSION_FILE, SUPER_ADMIN},
+    defs::{API_HASH, API_ID, BOT_SESSION_FILE, HEART_TIME, SESSION_FILE, SUPER_ADMIN},
     utils::{get_access_hash, get_common_chats, prompt, save_session},
 };
 
@@ -19,17 +23,27 @@ mod config;
 mod defs;
 mod utils;
 
-struct Reconnection;
+async fn heart_task(client: Client) -> Result<()> {
+    log::info!(
+        "Heart task is running for {}",
+        client.get_me().await?.full_name()
+    );
+    loop {
+        sleep(Duration::from_secs(HEART_TIME)).await;
 
-impl ReconnectionPolicy for Reconnection {
-    fn should_retry(&self, attempts: usize) -> std::ops::ControlFlow<(), std::time::Duration> {
-        if attempts > 5 {
-            panic!("reconnect attempts is 5, but not connect");
+        match timeout(
+            Duration::from_secs(30),
+            client.invoke(&tl::functions::Ping { ping_id: 0 }),
+        )
+        .await
+        {
+            Ok(Ok(_)) => log::info!("Heart task: successful"),
+            Ok(Err(e)) => log::warn!("Heart task: error: {}", e),
+            Err(e) => log::warn!("Heart task start failed: {}", e),
         }
-        let duration = u64::pow(5, attempts as _);
-        std::ops::ControlFlow::Continue(std::time::Duration::from_millis(duration))
     }
 }
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut builder = Builder::new();
@@ -54,7 +68,6 @@ async fn main() -> Result<()> {
         api_id: API_ID,
         api_hash: API_HASH.to_string(),
         params: InitParams {
-            reconnection_policy: &Reconnection,
             ..Default::default()
         },
     })
@@ -64,7 +77,6 @@ async fn main() -> Result<()> {
         api_id: API_ID,
         api_hash: API_HASH.to_string(),
         params: InitParams {
-            reconnection_policy: &Reconnection,
             ..Default::default()
         },
     })
@@ -100,8 +112,10 @@ async fn main() -> Result<()> {
     }
 
     save_session(&client, &bot);
-
     MainConfig::init();
+    tokio::spawn(heart_task(client.clone()));
+    tokio::spawn(heart_task(bot.clone()));
+
     loop {
         let update = bot.next_update().await?;
         match update {
@@ -109,12 +123,15 @@ async fn main() -> Result<()> {
                 let text = msg.text();
                 let chat = msg.chat();
                 let reply_id = Some(msg.clone().raw.id);
+                let config = MainConfig::read_config();
+                let group = config.clone().groups;
+                let admins = config.clone().admins;
 
                 if text.starts_with("/addadmin")
                     && chat.pack().is_user()
                     && chat.id() == SUPER_ADMIN
                 {
-                    let mut config = MainConfig::read_config();
+                    let mut config = config.clone();
                     let mut admins = config.admins.clone();
                     let user = text.trim_start_matches("/addadmin").trim();
                     let admin = user.parse::<i64>().unwrap();
@@ -131,7 +148,7 @@ async fn main() -> Result<()> {
                     && chat.pack().is_user()
                     && chat.id() == SUPER_ADMIN
                 {
-                    let mut config = MainConfig::read_config();
+                    let mut config = config.clone();
                     let mut groups = config.groups.clone();
                     let user = text.trim_start_matches("/addgroup").trim();
                     let group = user.parse::<i64>().unwrap();
@@ -144,11 +161,8 @@ async fn main() -> Result<()> {
                     )
                     .await?;
                 }
-                if text.starts_with("/c ") {
-                    let config = MainConfig::read_config();
-                    let group = config.groups;
-                    let admins = config.admins;
-                    let user = text.trim_start_matches("/c").trim();
+                if text.starts_with("/check") {
+                    let user = text.trim_start_matches("/check").trim();
                     let sended_msg = bot
                         .send_message(
                             chat.clone(),
@@ -272,10 +286,7 @@ async fn main() -> Result<()> {
                     bot.edit_message(chat.clone(), sended_msg.id(), send_msg)
                         .await?;
                 }
-                if text == "?c" {
-                    let config = MainConfig::read_config();
-                    let group = config.groups;
-                    let admins = config.admins;
+                if text == "/reply" {
                     let reply = match msg.get_reply().await? {
                         Some(r) => r,
                         None => {

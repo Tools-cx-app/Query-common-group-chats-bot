@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::defs::CONFIG_FILE;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MainConfig {
     pub groups: HashSet<i64>,
     pub admins: HashSet<i64>,

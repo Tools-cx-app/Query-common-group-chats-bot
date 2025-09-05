@@ -4,3 +4,4 @@ pub const API_HASH: &str = "1";
 pub const SESSION_FILE: &str = "userbot.session";
 pub const BOT_SESSION_FILE: &str = "bot.session";
 pub const CONFIG_FILE: &str = "config.toml";
+pub const HEART_TIME: u64 = 180;
