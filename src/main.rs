@@ -1,22 +1,18 @@
-use std::{
-    io::Write,
-    time::{Duration, Instant},
-};
+use std::{io::Write, time::Duration};
 
 use anyhow::Result;
 use env_logger::Builder;
 use grammers_client::{
-    Client, Config, InitParams, InputMessage, ReconnectionPolicy, SignInError, Update,
+    Client, Config, InitParams, InputMessage, SignInError, Update,
     grammers_tl_types::{self as tl},
     session::Session,
-    types::PackedChat,
 };
 use tokio::time::{sleep, timeout};
 
 use crate::{
     config::MainConfig,
     defs::{API_HASH, API_ID, BOT_SESSION_FILE, HEART_TIME, SESSION_FILE, SUPER_ADMIN},
-    utils::{get_access_hash, get_common_chats, prompt, save_session},
+    utils::{get_common_chats, get_packed_user, prompt, save_session},
 };
 
 mod config;
@@ -174,15 +170,8 @@ async fn main() -> Result<()> {
                             .await?;
                         continue;
                     }
-                    #[allow(unused_assignments)]
-                    let mut packed_user = PackedChat {
-                        ty: grammers_client::session::PackedType::User,
-                        id: 0,
-                        access_hash: Some(0),
-                    };
-
-                    if user.starts_with("@") {
-                        let u = match client
+                    let packed_user = if user.starts_with("@") {
+                        let id = match client
                             .resolve_username(user.trim_start_matches("@").trim())
                             .await?
                         {
@@ -191,8 +180,20 @@ async fn main() -> Result<()> {
                                 bot.edit_message(chat, sended_msg.id(), "未知用户").await?;
                                 continue;
                             }
-                        };
-                        packed_user = u.pack();
+                        }
+                        .id();
+                        match get_packed_user(&client, id).await {
+                            Ok(p) => p,
+                            Err(_) => {
+                                bot.edit_message(
+                                    chat.clone(),
+                                    sended_msg.id(),
+                                    "不能获取用户access_hash，你能确保我见过吗",
+                                )
+                                .await?;
+                                continue;
+                            }
+                        }
                     } else {
                         let id = match user.parse::<i64>() {
                             Ok(i) => i,
@@ -202,32 +203,19 @@ async fn main() -> Result<()> {
                                 continue;
                             }
                         };
-                        #[allow(unused_assignments)]
-                        let mut hash = Some(0);
-                        hash = get_access_hash(&client, id).await?;
-
-                        if matches!(hash, Some(0) | None) {
-                            log::error!(
-                                "get user access_hash using getusers failed: user: {}, hash: {:?}",
-                                id,
-                                hash
-                            );
-                            bot.edit_message(
-                                chat.clone(),
-                                sended_msg.id(),
-                                "不能获取用户access_hash，你能确保我见过吗",
-                            )
-                            .await?;
-                            continue;
+                        match get_packed_user(&client, id).await {
+                            Ok(p) => p,
+                            Err(_) => {
+                                bot.edit_message(
+                                    chat.clone(),
+                                    sended_msg.id(),
+                                    "不能获取用户access_hash，你能确保我见过吗",
+                                )
+                                .await?;
+                                continue;
+                            }
                         }
-
-                        packed_user = PackedChat {
-                            ty: grammers_client::session::PackedType::User,
-                            id,
-                            access_hash: hash,
-                        };
-                    }
-
+                    };
                     if packed_user.id == client.get_me().await?.id()
                         || packed_user.id == bot.get_me().await?.id()
                     {
@@ -308,16 +296,8 @@ async fn main() -> Result<()> {
                             .await?;
                             continue;
                         }
-                    };
-                    let sender = sender.pack();
-                    if let None = sender.access_hash {
-                        bot.send_message(
-                            chat.clone(),
-                            InputMessage::text("无法获取access_hash").reply_to(reply_id),
-                        )
-                        .await?;
-                        continue;
                     }
+                    .pack();
                     if sender.id == client.get_me().await?.id()
                         || sender.id == bot.get_me().await?.id()
                     {
@@ -334,6 +314,18 @@ async fn main() -> Result<()> {
                             InputMessage::text("查询中...").reply_to(reply_id),
                         )
                         .await?;
+                    let sender = match get_packed_user(&client, sender.id).await {
+                        Ok(p) => p,
+                        Err(_) => {
+                            bot.edit_message(
+                                chat.clone(),
+                                sended_msg.id(),
+                                "不能获取用户access_hash，你能确保我见过吗",
+                            )
+                            .await?;
+                            continue;
+                        }
+                    };
                     let mut count = 0;
                     let mut admin_list = Vec::new();
                     let groups = get_common_chats(&client, &sender, 100).await?;

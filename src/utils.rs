@@ -63,7 +63,7 @@ pub async fn get_common_chats(
     Ok(chats)
 }
 
-pub async fn get_access_hash(client: &Client, target_id: i64) -> Result<Option<i64>> {
+async fn get_access_hash(client: &Client, target_id: i64) -> Result<Option<i64>> {
     let input_user = tl::enums::InputUser::User(tl::types::InputUser {
         user_id: target_id,
         access_hash: 0,
@@ -76,10 +76,39 @@ pub async fn get_access_hash(client: &Client, target_id: i64) -> Result<Option<i
         .await?;
 
     if let Some(tl::enums::User::User(u)) = resp.into_iter().next() {
-        Ok(u.access_hash)
-    } else {
-        Ok(None)
+        return Ok(u.access_hash);
     }
+
+    let mut dialogs = client.iter_dialogs().limit(50);
+    while let Some(d) = dialogs.next().await? {
+        if d.chat.pack().is_user() && d.chat.pack().id == target_id {
+            return Ok(d.chat.pack().access_hash);
+        }
+    }
+
+    return Ok(Some(0));
+}
+
+pub async fn get_packed_user(client: &Client, target_id: i64) -> Result<PackedChat> {
+    #[allow(unused_assignments)]
+    let mut hash = Some(0);
+    hash = get_access_hash(&client, target_id).await?;
+
+    if matches!(hash, Some(0) | None) {
+        log::error!(
+            "get user access_hash using getusers failed: user: {}, hash: {:?}",
+            target_id,
+            hash
+        );
+
+        return Err(anyhow::anyhow!(""));
+    }
+
+    Ok(PackedChat {
+        ty: grammers_client::session::PackedType::User,
+        id: target_id,
+        access_hash: hash,
+    })
 }
 
 pub fn save_session(client: &Client, bot: &Client) {
